@@ -41,9 +41,11 @@ class Weather():
         self.weather_info = {}      # словарь хранит в себе информацию о погоде
 
     def get_weather(self):
-        """Метод окрывает страницу сайта, считывает данные.
+        """Метод открывает страницу сайта, считывает данные.
         При попытке открыть страницу сайта могут возникать ошибки,
-        например страницы может просто не оказаться, мог смениться url и др."""
+        например страницы может просто не оказаться, мог смениться url и др.
+        Возвращает экземпляр класса BeautifulSoup.
+        В случае ошибки возвращает None"""
         try:  # попытка открыть страницу
             html = urlopen(self.url_sity)
             bs = BeautifulSoup(html.read(), 'html.parser')
@@ -51,82 +53,103 @@ class Weather():
                 html.close()
         except HTTPError as e:  # 404 Page Not Found, 500 Internal Server Error
             print(e)
+            return None
         except URLError as e:  # ни один из указанных серверов недоступен
             print(e)
-        else:   # ошибок не было. Продолжаем выполнение метода
-            # получаем дату
-            dt = datetime.datetime.now()    # получили текущую дату и время
-            self.weather_data['date'] = dt.strftime('%Y-%m-%d %H:%M:%S')    # sqlite3 хранит дату в виде строки
-            self.weather_data['day_count'] = int(f'{dt:%j}')    # номер дня в году
+            return None
+        else:  # ошибок не было. Продолжаем выполнение метода
+            return bs
 
-            # эти данные сохраняются на всякий случай )))
-            self.weather_data['day'] = dt.day
-            self.weather_data['month'] = dt.month
-            self.weather_data['year'] = dt.year
-            self.weather_data['hour'] = dt.hour
-            self.weather_data['minute'] = dt.minute
-            self.weather_data['second'] = dt.second
 
-            widget_now = bs.find('div', {'class': {'widget now'}})      # тег содержит всю необходимую нам информацию
+    def get_datetime(self):
+        """Метод получает текущую дату и время и сохраняет данные
+        в атрибуте метода weather_data"""
+        dt = datetime.datetime.now()  # получили текущую дату и время
+        self.weather_data['date'] = dt.strftime('%Y-%m-%d %H:%M:%S')  # sqlite3 хранит дату в виде строки
+        self.weather_data['day_count'] = int(f'{dt:%j}')  # номер дня в году
 
-            """Получим время восхода солнца и время захода солнца"""
-            wnd = widget_now.find_all('div', {'class':{'caption', 'time'}})
-            time_sunrise = wnd[3].text
-            if len(time_sunrise) < 5:
-                time_sunrise = '0' + time_sunrise
-            time_sunset = wnd[1].text
-            if len(time_sunset) < 5:
-                time_sunset = '0' + time_sunset
-            self.weather_info['sunrise'] = time_sunrise
-            self.weather_info['sunset'] = time_sunset
+        # эти данные сохраняются на всякий случай )))
+        self.weather_data['day'] = dt.day
+        self.weather_data['month'] = dt.month
+        self.weather_data['year'] = dt.year
+        self.weather_data['hour'] = dt.hour
+        self.weather_data['minute'] = dt.minute
+        self.weather_data['second'] = dt.second
 
-            # рассчитаем долготу дня
-            time_rise = datetime.datetime.strptime(time_sunrise, '%H:%M')
-            time_set = datetime.datetime.strptime(time_sunset, '%H:%M')
-            len_day = time_set - time_rise      # долгота дня в секундах
-            len_day_hour = len_day.seconds//3600
-            len_day_min = (len_day.seconds - len_day_hour * 3600) // 60
-            len_day_str = f'{str(len_day_hour)}:{str(len_day_min)}' if len_day_hour > 9 else f'0{str(len_day_hour)}:{str(len_day_min)}'
-            self.weather_info['len_day'] = len_day_str
+    def get_len_day(self, widget):
+        """Метод принимает блок кода, прочитанного из сайта
+        рассчитывает долготу дня и сохраняет время восхода солнца,
+        время захода солнца и долготу дня в атрибуте экземпляра weather_info"""
+        wnd = widget.find_all('div', {'class': {'caption', 'time'}})
+        time_sunrise = wnd[3].text
+        if len(time_sunrise) < 5:
+            time_sunrise = '0' + time_sunrise
+        time_sunset = wnd[1].text
+        if len(time_sunset) < 5:
+            time_sunset = '0' + time_sunset
+        self.weather_info['sunrise'] = time_sunrise
+        self.weather_info['sunset'] = time_sunset
 
-            wnd = widget_now.find('div', {'class': {'now-desc'}})
-            # self.weather_info['state'] = wnd.text       # ????????????
-            #
-            wnd =widget_now.find('temperature-value', {})
-            self.weather_info['temperature'] = int(wnd.attrs['value'])
-            self.weather_info['temperature_measure'] = wnd.attrs['from-unit'].upper()
+        # рассчитаем долготу дня
+        time_rise = datetime.datetime.strptime(time_sunrise, '%H:%M')
+        time_set = datetime.datetime.strptime(time_sunset, '%H:%M')
+        len_day = time_set - time_rise  # долгота дня в секундах
+        len_day_hour = len_day.seconds // 3600
+        len_day_min = (len_day.seconds - len_day_hour * 3600) // 60
+        len_day_str = f'{str(len_day_hour)}:{str(len_day_min)}' if len_day_hour > 9 else f'0{str(len_day_hour)}:{str(len_day_min)}'
+        self.weather_info['len_day'] = len_day_str
 
-            wnd = widget_now.find_all('div', {'class': {'item-title', 'item-value', 'item-measure'}})
+    def get_state(self, widget):
+        """Метод принимает блок кода, прочитанного из сайта
+        находит в этом блоке кода состояние погоды и сохраняет данные
+        в атрибуте экземпляра weather_info"""
+        wnd = widget.find('div', {'class': {'now-desc'}})
+        self.weather_info['state'] = wnd.text
 
-            """Ветер"""
-            self.weather_info['wind'] = int(wnd[1].contents[0]['value'])
-            self.weather_info['wind_measure'] = wnd[1].contents[0]['from-unit']
-            if self.weather_info['wind_measure'] == 'ms':
-                self.weather_info['wind_measure'] = 'м/сек'
-            self.weather_info['wind_direct'] = wnd[2].text
+    def get_temperature(self, widget):
+        """Метод принимает блок кода, прочитанного из сайта
+        находит в этом блоке кода температуру воздуха и сохраняет данные
+        в атрибуте экземпляра weather_info"""
+        wnd = widget.find('temperature-value', {})
+        self.weather_info['temperature'] = int(wnd.attrs['value'])
+        self.weather_info['temperature_measure'] = wnd.attrs['from-unit'].upper()
 
-            """Давление"""
-            self.weather_info['pressure'] = int(wnd[4].contents[0]['value'])
-            self.weather_info['pressure_measure'] = wnd[4].contents[0]['from-unit']
-            if self.weather_info['pressure_measure'] == 'mmhg':
-                self.weather_info['pressure_measure'] = 'мм.рт.ст.'
+    def get_weather_info(self, widget):
+        """Метод принимает блок кода, прочитанного из сайта
+        находит в этом блоке кода прочую информацию о погоде и сохраняет данные
+        в атрибуте экземпляра weather_info"""
+        wnd = widget.find_all('div', {'class': {'item-title', 'item-value', 'item-measure'}})
 
-            """Влажность"""
-            self.weather_info['humidity'] = int(wnd[7].contents[0])
-            self.weather_info['humidity_measure'] = wnd[8].contents[0].text
+        """Ветер"""
+        self.weather_info['wind'] = int(wnd[1].contents[0]['value'])
+        self.weather_info['wind_measure'] = wnd[1].contents[0]['from-unit']
+        if self.weather_info['wind_measure'] == 'ms':
+            self.weather_info['wind_measure'] = 'м/сек'
+        self.weather_info['wind_direct'] = wnd[2].text
 
-            """Геомагнитная звисимость"""
-            self.weather_info['geo_dependence'] = int(wnd[10].contents[0])
-            get_tex= 'балл'
-            if 1 < self.weather_info['geo_dependence'] < 5:
-                get_tex = 'балла'
-            elif self.weather_info['geo_dependence'] >= 5:
-                get_tex = 'баллов'
-            self.weather_info['geo_dependence_measure'] = f'{get_tex} из 9'
+        """Давление"""
+        self.weather_info['pressure'] = int(wnd[4].contents[0]['value'])
+        self.weather_info['pressure_measure'] = wnd[4].contents[0]['from-unit']
+        if self.weather_info['pressure_measure'] == 'mmhg':
+            self.weather_info['pressure_measure'] = 'мм.рт.ст.'
 
-            """Вода"""
-            self.weather_info['temperature_water'] = int(wnd[13].contents[0].attrs['value'])
-            self.weather_info['temperature_water_measure'] = wnd[13].contents[0].attrs['from-unit'].upper()
+        """Влажность"""
+        self.weather_info['humidity'] = int(wnd[7].contents[0])
+        self.weather_info['humidity_measure'] = wnd[8].contents[0].text
+
+        """Геомагнитная звисимость"""
+        self.weather_info['geo_dependence'] = int(wnd[10].contents[0])
+        get_tex = 'балл'
+        if 1 < self.weather_info['geo_dependence'] < 5:
+            get_tex = 'балла'
+        elif self.weather_info['geo_dependence'] >= 5:
+            get_tex = 'баллов'
+        self.weather_info['geo_dependence_measure'] = f'{get_tex} из 9'
+
+        """Вода"""
+        self.weather_info['temperature_water'] = int(wnd[13].contents[0].attrs['value'])
+        self.weather_info['temperature_water_measure'] = wnd[13].contents[0].attrs['from-unit'].upper()
+
 
 
 
@@ -134,6 +157,16 @@ class Weather():
 
 if __name__ == '__main__':
     weather = Weather(info.url_weather)
-    weather.get_weather()
+    bs = weather.get_weather()
+    widget_now = bs.find('div', {'class': {'widget now'}})  # тег содержит всю необходимую нам информацию
+    weather.get_datetime()                  # текущая дата
+    weather.get_len_day(widget_now)         # восход, заход солнца и долгота дня
+    weather.get_state(widget_now)           # состояние
+    weather.get_temperature(widget_now)     # температура воздуха
+    weather.get_weather_info(widget_now)    # прочая информация о погоде
+
     pprint(weather.weather_data)
     pprint((weather.weather_info))
+
+
+    'divided into methods'
